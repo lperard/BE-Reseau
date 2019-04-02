@@ -2,11 +2,12 @@
 #include <api/mictcp_core.h>
 #include <time.h>
 
-#define MAX_RESEND 500
+#define MAX_RESEND 50
 #define RESEND_TIMEOUT 20 //en ms
 #define TAILLE_FENETRE_GLISSANTE 10
 
-int derniers_messages[TAILLE_FENETRE_GLISSANTE];
+int derniers_messages[TAILLE_FENETRE_GLISSANTE]; //1 = message acquitté, 0 = message perdu
+float taux_perte_acceptable = 0.50;
 
 /* Définition des variables gloables */
 mic_tcp_sock sock;
@@ -39,7 +40,7 @@ int mic_tcp_socket(start_mode sm)
         return -1;
     }
 
-    set_loss_rate(0);
+    set_loss_rate(80);
 
     return sock.fd;
 }
@@ -87,14 +88,29 @@ void init_fen(int * init){
     *init = 1;
 }
 
+float taux_perte(){
+    printf("Calcul du taux de perte\n");
+    int nb_mess_acquitte = 0;
+    for(int i = 0; i < TAILLE_FENETRE_GLISSANTE; i++)
+        nb_mess_acquitte += derniers_messages[i];
+    return 1 - (nb_mess_acquitte * 1.0 / TAILLE_FENETRE_GLISSANTE);
+}
+
 /*
  * Permet de réclamer l’envoi d’une donnée applicative
  * Retourne la taille des données envoyées, et -1 en cas d'erreur
  */
+
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
-    static int init = 0;
-    if(!init_fen) init_fen(&init);
+    static int init= 0;
+    if(init == 0) {
+        printf("Initialisation de la fenêtre\n");
+        init_fen(&init);
+    }
+        
+
+    static int n_message = 0;
 
     if(sock.fd == mic_sock){
         mic_tcp_pdu pdu;
@@ -108,14 +124,23 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 
         int nb_resend = 0;
         mic_tcp_pdu ack;
+
         while(nb_resend < MAX_RESEND){
             if(IP_recv(&ack, & sock.addr, RESEND_TIMEOUT) == -1){ // si le timer expire
+
+                if(taux_perte() < taux_perte_acceptable){ //si on peut perdre le message, on ne renvoie rien
+                    derniers_messages[n_message] = 0;
+                    printf("ACK DROPPED, taux de pertes actuel : %f\n", taux_perte()); ///Probleme d'arrondi, a voir
+                    break;
+                }
+
+                //renvoi du message, mécanisme du stop and wait à reprise des pertes totales
                 nb_resend++;
                 printf("Timeout ack, resending (%d left)... \n", MAX_RESEND - nb_resend);
                 size = IP_send(pdu, sock.addr);
             } else { // on recoit le ack on quitte la boucle while
                 printf("Reception du ack n %d \n", ack.header.ack_num);
-                nb_resend = 0;
+                derniers_messages[n_message] = 1;
                 break;
 
                 /*
@@ -125,6 +150,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
             }
         }
 
+        n_message = (n_message + 1) % TAILLE_FENETRE_GLISSANTE;
         return size;
     } else {
         return -1;
