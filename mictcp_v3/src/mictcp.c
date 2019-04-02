@@ -6,7 +6,7 @@
 #define RESEND_TIMEOUT 20 //en ms
 #define TAILLE_FENETRE_GLISSANTE 10
 
-int derniers_messages[TAILLE_FENETRE_GLISSANTE]; //1 = message acquitté, 0 = message perdu
+char derniers_messages[TAILLE_FENETRE_GLISSANTE]; //1 = message acquitté, 0 = message perdu
 float taux_perte_acceptable = 0.50;
 
 /* Définition des variables gloables */
@@ -34,7 +34,7 @@ int mic_tcp_socket(start_mode sm)
     
     sock.fd = nextld++;
     sock.state = IDLE;
-
+    
     if(initialize_components(sm) == -1){
         printf("Erreur dans la creation du socket\n"); /* Appel obligatoire */
         return -1;
@@ -73,7 +73,7 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
  */
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 {
-    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+   printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
     
     return 0;
 }
@@ -152,10 +152,10 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     }
 }
 
-/*
- * Permet à l’application réceptrice de réclamer la récupération d’une donnée
- * stockée dans les buffers de réception du socket
- * Retourne le nombre d’octets lu ou bien -1 en cas d’erreur
+/*bind
+ * Permet à l’apbindplication réceptrice de réclamer la récupération d’une donnée
+ * stockée dans bindles buffers de réception du socket
+ * Retourne le nbindombre d’octets lu ou bien -1 en cas d’erreur
  * NB : cette fonction fait appel à la fonction app_buffer_get()
  */
 int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)

@@ -67,6 +67,12 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
     return 0;
 }
 
+int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
+{
+    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+    return 0;
+}
+
 /*
  * Permet de réclamer l’établissement d’une connexion
  * Retourne 0 si la connexion est établie, et -1 en cas d’échec
@@ -74,6 +80,32 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+    if(sock.state == IDLE){
+        //construction du pdu syn
+        mic_tcp_pdu pdusyn;
+        pdusyn.header.syn = 1;
+        pdusyn.header.dest_port = addr.port;
+        
+        mic_tcp_pdu synack;
+        do{
+            sock.state = WAIT_FOR_ACK;
+            IP_send(pdusyn, addr); //envoie de syn
+        }while(IP_recv(&synack, &sock.addr, RESEND_TIMEOUT) == -1);
+
+        if(synack.header.syn == 1 && synack.header.ack == 1){
+            //construction et envoi du pdu ack
+            mic_tcp_pdu pduack;
+            pduack.header.ack = 1;
+            pduack.header.dest_port = addr.port;
+            IP_send(pduack, addr);
+
+            sock.state = CONNECTED;
+        }else{
+            return -1; //ce n'est pas un synack, connexion echouée
+        }
+    }else{
+        return -1; //on n'est pas en IDLE
+    }
     
     return 0;
 }
