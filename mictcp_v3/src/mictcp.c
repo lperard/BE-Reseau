@@ -40,7 +40,7 @@ int mic_tcp_socket(start_mode sm)
         return -1;
     }
 
-    set_loss_rate(80);
+    set_loss_rate(20);
 
     return sock.fd;
 }
@@ -89,7 +89,6 @@ void init_fen(int * init){
 }
 
 float taux_perte(){
-    printf("Calcul du taux de perte\n");
     int nb_mess_acquitte = 0;
     for(int i = 0; i < TAILLE_FENETRE_GLISSANTE; i++)
         nb_mess_acquitte += derniers_messages[i];
@@ -104,12 +103,8 @@ float taux_perte(){
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
     static int init= 0;
-    if(init == 0) {
-        printf("Initialisation de la fenêtre\n");
-        init_fen(&init);
-    }
-        
-
+    if(init == 0)   init_fen(&init);
+    
     static int n_message = 0;
 
     if(sock.fd == mic_sock){
@@ -130,7 +125,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 
                 if(taux_perte() < taux_perte_acceptable){ //si on peut perdre le message, on ne renvoie rien
                     derniers_messages[n_message] = 0;
-                    printf("ACK DROPPED, taux de pertes actuel : %f\n", taux_perte()); ///Probleme d'arrondi, a voir
+                    printf("ACK DROPPED, taux de pertes actuel : %f\n", taux_perte());
                     break;
                 }
 
