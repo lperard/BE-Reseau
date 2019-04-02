@@ -3,7 +3,8 @@
 #include <time.h>
 
 #define MAX_RESEND 50
-#define RESEND_TIMEOUT 20 //en ms
+#define TIMEOUT 20 //en ms
+#define TIMEOUTACCEPT 1000000 //en ms, doit être suffisamment long pour lancer la source
 #define TAILLE_FENETRE_GLISSANTE 10
 
 int derniers_messages[TAILLE_FENETRE_GLISSANTE]; //1 = message acquitté, 0 = message perdu
@@ -64,12 +65,31 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-    return 0;
-}
 
-int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
-{
-    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+    mic_tcp_pdu syn;
+    if(IP_recv(&syn, &sock.addr, TIMEOUTACCEPT) == -1)
+        return -1; //timer expire
+
+    if(syn.header.syn == 1 && syn.header.ack == 0){
+        //construction du pdu synack
+        mic_tcp_pdu synack;
+        synack.header.syn = 1;
+        synack.header.ack = 1;
+        synack.header.dest_port = addr->port;
+        
+        //tant que l'on a pas recu de synack
+        mic_tcp_pdu ack;
+        do{
+            IP_send(synack, *addr); //envoie de synack
+        }while(IP_recv(&ack, &sock.addr, TIMEOUT) == -1);
+
+        if(ack.header.ack == 0 || ack.header.syn == 1)
+            return -1; // ce n'est pas un ack, connexion echouée
+
+    }else{
+        return -1; // ce n'est pas un syn, connexion echouée
+    }
+
     return 0;
 }
 
@@ -81,33 +101,50 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
     if(sock.state == IDLE){
+
+        printf("addr : %s %d %d\n",addr.ip_addr, addr.ip_addr_size, addr.port);
+
         //construction du pdu syn
-        mic_tcp_pdu pdusyn;
-        pdusyn.header.syn = 1;
-        pdusyn.header.dest_port = addr.port;
+        mic_tcp_pdu syn;
+        syn.header.source_port = sock.addr.port;
+        syn.header.dest_port = addr.port;
+        syn.header.syn = 1;
+//        syn.payload.size = 0;
+//        syn.payload.data = "";
         
+        //tant que l'on a pas recu de synack
         mic_tcp_pdu synack;
+        synack.payload.size = 2*sizeof(short)+2*sizeof(int)+3*sizeof(char);
+        synack.payload.data = malloc(synack.payload.size);
         do{
-            sock.state = WAIT_FOR_ACK;
-            IP_send(pdusyn, addr); //envoie de syn
-        }while(IP_recv(&synack, &sock.addr, RESEND_TIMEOUT) == -1);
+            printf("1\n");
+            printf("%d\n",IP_send(syn, addr));
+            //if(IP_send(syn, addr) == -1) // envoie de syn
+            //    return -1; // erreur ipsend
+            printf("2\n");
+        }while(IP_recv(&synack, &sock.addr, TIMEOUT) == -1);
+
+        printf("non ? et ça ?\n");
 
         if(synack.header.syn == 1 && synack.header.ack == 1){
             //construction et envoi du pdu ack
-            mic_tcp_pdu pduack;
-            pduack.header.ack = 1;
-            pduack.header.dest_port = addr.port;
-            IP_send(pduack, addr);
+            mic_tcp_pdu ack;
+            ack.header.ack = 1;
+            ack.header.dest_port = addr.port;
+            IP_send(ack, addr);
 
             sock.state = CONNECTED;
         }else{
             return -1; //ce n'est pas un synack, connexion echouée
         }
+
+        printf("toujours pas ? et ceci ?\n");
+
     }else{
         return -1; //on n'est pas en IDLE
     }
     
-    return 0;
+    return 0; // la connexion est etablie
 }
 
 /*
@@ -131,30 +168,31 @@ float taux_perte(){
  * Permet de réclamer l’envoi d’une donnée applicative
  * Retourne la taille des données envoyées, et -1 en cas d'erreur
  */
-
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
+    if(sock.state != CONNECTED)
+        return -1; // pas en etat connecté, on n'envoie pas
+
     static int init= 0;
     if(init == 0)   init_fen(&init);
     
     static int n_message = 0;
 
     if(sock.fd == mic_sock){
-        mic_tcp_pdu pdu;
 
+        //construction du pdu
+        mic_tcp_pdu pdu;
         pdu.payload.data = mesg;
         pdu.payload.size = mesg_size;
         pdu.header.dest_port = sock.addr.port;
         pdu.header.seq_num = sn++;
-
         int size = IP_send(pdu, sock.addr);
 
         int nb_resend = 0;
         mic_tcp_pdu ack;
 
         while(nb_resend < MAX_RESEND){
-            if(IP_recv(&ack, & sock.addr, RESEND_TIMEOUT) == -1){ // si le timer expire
-
+            if(IP_recv(&ack, & sock.addr, TIMEOUT) == -1){ // si le timer expire
                 if(taux_perte() < taux_perte_acceptable){ //si on peut perdre le message, on ne renvoie rien
                     derniers_messages[n_message] = 0;
                     printf("ACK DROPPED, taux de pertes actuel : %f\n", taux_perte());
@@ -166,6 +204,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
                 printf("Timeout ack, resending (%d left)... \n", MAX_RESEND - nb_resend);
                 size = IP_send(pdu, sock.addr);
             } else { // on recoit le ack on quitte la boucle while
+                //TODO verifier que c'est un ack
                 printf("Reception du ack n %d \n", ack.header.ack_num);
                 derniers_messages[n_message] = 1;
                 break;
@@ -193,6 +232,10 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+ 
+    if(sock.state != CONNECTED)
+        return -1; // pas en etat connecté, on ne peut pas recevoir
+
     mic_tcp_payload mesg_recu;
     int nb_octets_lus;
 
