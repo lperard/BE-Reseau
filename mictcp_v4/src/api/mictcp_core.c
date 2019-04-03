@@ -103,9 +103,7 @@ int IP_send(mic_tcp_pdu pk, mic_tcp_sock_addr addr)
         result = -1;
 
     } else {
-        printf("3\n");
         mic_tcp_payload tmp = get_full_stream(pk);
-        printf("4\n");
         int sent_size =  mic_tcp_core_send(tmp);
 
         free (tmp.data);

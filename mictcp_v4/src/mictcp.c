@@ -16,13 +16,17 @@ int nextld = 0; // id du socket
 int sn = 0; // numero de sequence du message à envoyer
 int last_sn = 0; // n de sequence du dernier message recu
 
-/* Remplit le header du pdu */
-void fill_pdu_header(mic_tcp_header * header, unsigned int seq_num, unsigned int ack_num, unsigned char syn, unsigned char ack, unsigned char fin){
-    header->seq_num = seq_num;
-    header->ack_num = ack_num;
-    header->syn = syn;
-    header->ack = ack;
-    header->fin = fin;
+/* Permet de remplir les champs d'un pdu */
+void fill_pdu(mic_tcp_pdu * pdu,unsigned short source_port, unsigned short dest_port, unsigned int seq_num, unsigned int ack_num, unsigned char syn, unsigned char ack, unsigned char fin, char * data, int size){
+    pdu->header.source_port = source_port;
+    pdu->header.dest_port = dest_port;
+    pdu->header.seq_num = seq_num;
+    pdu->header.ack_num = ack_num;
+    pdu->header.syn = syn;
+    pdu->header.ack = ack;
+    pdu->header.fin = fin;
+    pdu->payload.data = data;
+    pdu->payload.size = size;
 }
 
 /*
@@ -73,9 +77,10 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
     if(syn.header.syn == 1 && syn.header.ack == 0){
         //construction du pdu synack
         mic_tcp_pdu synack;
-        synack.header.syn = 1;
+        fill_pdu(&synack,0,addr->port,0,0,1,1,0,"",0); //initialisation du synack
+        /*synack.header.syn = 1;
         synack.header.ack = 1;
-        synack.header.dest_port = addr->port;
+        synack.header.dest_port = addr->port; */
         
         //tant que l'on a pas recu de synack
         mic_tcp_pdu ack;
@@ -106,11 +111,12 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 
         //construction du pdu syn
         mic_tcp_pdu syn;
-        syn.header.source_port = sock.addr.port;
+        fill_pdu(&syn, sock.addr.port, addr.port,0,0,1,0,0,"",0); //initialisation du syn
+        /*syn.header.source_port = sock.addr.port;
         syn.header.dest_port = addr.port;
         syn.header.syn = 1;
-//        syn.payload.size = 0;
-//        syn.payload.data = "";
+        syn.payload.size = 0;
+        syn.payload.data = ""; */
         
         //tant que l'on a pas recu de synack
         mic_tcp_pdu synack;
@@ -129,8 +135,9 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
         if(synack.header.syn == 1 && synack.header.ack == 1){
             //construction et envoi du pdu ack
             mic_tcp_pdu ack;
-            ack.header.ack = 1;
-            ack.header.dest_port = addr.port;
+            fill_pdu(&ack,0,addr.port,0,0,0,1,0,"",0);
+            /*ack.header.ack = 1;
+            ack.header.dest_port = addr.port; */
             IP_send(ack, addr);
 
             sock.state = CONNECTED;
@@ -182,9 +189,10 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 
         //construction du pdu
         mic_tcp_pdu pdu;
-        pdu.payload.data = mesg;
+        fill_pdu(&pdu,0,sock.addr.port,0,0,0,0,0,mesg,mesg_size);
+        /*pdu.payload.data = mesg;
         pdu.payload.size = mesg_size;
-        pdu.header.dest_port = sock.addr.port;
+        pdu.header.dest_port = sock.addr.port;*/
         pdu.header.seq_num = sn++;
         int size = IP_send(pdu, sock.addr);
 
@@ -272,9 +280,10 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
     
     mic_tcp_pdu ack;
-    ack.header.ack = 1; //flag pour indiquer que le message est un acquitement
+    fill_pdu(&ack,0,0,0,pdu.header.seq_num,0,1,0,"",0);
+    /*ack.header.ack = 1; //flag pour indiquer que le message est un acquitement
     ack.header.ack_num = pdu.header.seq_num;
-    ack.payload.size = 0;
+    ack.payload.size = 0;*/
 
     IP_send(ack, sock.addr); //envoie l'acquitement
     
