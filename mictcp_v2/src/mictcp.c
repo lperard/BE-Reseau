@@ -36,7 +36,7 @@ int mic_tcp_socket(start_mode sm)
         return -1;
     }
 
-    set_loss_rate(50);
+    set_loss_rate(5);
 
     return sock.fd;
 }
@@ -98,7 +98,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
                 printf("Timeout ack, resending (%d left)... \n", MAX_RESEND - nb_resend);
                 size = IP_send(pdu, sock.addr);
             } else { // on recoit le ack on quitte la boucle while
-                printf("Reception du ack n %d \n", ack.header.ack_num);
+                printf("Reception du pdu n %d\n", pdu.header.seq_num);
                 nb_resend = 0;
                 break;
 

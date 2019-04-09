@@ -3,8 +3,8 @@
 #include <time.h>
 
 #define MAX_RESEND 50
-#define TIMEOUT 20 //en ms
-#define TIMEOUTACCEPT 1000000 //en ms, doit être suffisamment long pour lancer la source
+#define TIMEOUT 200 //en ms
+#define TIMEOUTACCEPT 1000000000 //en ms, doit être suffisamment long pour lancer la source
 #define TAILLE_FENETRE_GLISSANTE 10
 
 int derniers_messages[TAILLE_FENETRE_GLISSANTE]; //1 = message acquitté, 0 = message perdu
@@ -45,7 +45,7 @@ int mic_tcp_socket(start_mode sm)
         return -1;
     }
 
-    set_loss_rate(20);
+    set_loss_rate(0);
 
     return sock.fd;
 }
@@ -70,30 +70,25 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
 
-    mic_tcp_pdu syn;
-    if(IP_recv(&syn, &sock.addr, TIMEOUTACCEPT) == -1)
-        return -1; //timer expire
+    sock.state = WAIT_FOR_SYN;
 
-    if(syn.header.syn == 1 && syn.header.ack == 0){
-        //construction du pdu synack
-        mic_tcp_pdu synack;
-        fill_pdu(&synack,0,addr->port,0,0,1,1,0,"",0); //initialisation du synack
-        /*synack.header.syn = 1;
-        synack.header.ack = 1;
-        synack.header.dest_port = addr->port; */
-        
-        //tant que l'on a pas recu de synack
-        mic_tcp_pdu ack;
-        do{
-            IP_send(synack, *addr); //envoie de synack
-        }while(IP_recv(&ack, &sock.addr, TIMEOUT) == -1);
+    /* attend le SYN */
+    while(sock.state == WAIT_FOR_SYN);
 
-        if(ack.header.ack == 0 || ack.header.syn == 1)
-            return -1; // ce n'est pas un ack, connexion echouée
+    /* on envoie SYNACK */
+    mic_tcp_pdu synack;
+    fill_pdu(&synack,sock.addr.port,addr->port,0,0,1,1,0,"",0);
+    if(IP_send(synack, *addr) == -1)
+        return -1;
 
-    }else{
-        return -1; // ce n'est pas un syn, connexion echouée
-    }
+    printf("sent synack\n");
+
+    /* attend le ACK */
+    while(sock.state == WAIT_FOR_ACK);
+
+    printf("connected ! :)\n");
+
+    sleep(10);
 
     return 0;
 }
@@ -112,40 +107,35 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
         //construction du pdu syn
         mic_tcp_pdu syn;
         fill_pdu(&syn, sock.addr.port, addr.port,0,0,1,0,0,"",0); //initialisation du syn
-        /*syn.header.source_port = sock.addr.port;
-        syn.header.dest_port = addr.port;
-        syn.header.syn = 1;
-        syn.payload.size = 0;
-        syn.payload.data = ""; */
-        
+
         //tant que l'on a pas recu de synack
         mic_tcp_pdu synack;
         synack.payload.size = 2*sizeof(short)+2*sizeof(int)+3*sizeof(char);
         synack.payload.data = malloc(synack.payload.size);
+        synack.payload.data = "Hello babane\n";
+        
         do{
-            printf("1\n");
-            printf("%d\n",IP_send(syn, addr));
-            //if(IP_send(syn, addr) == -1) // envoie de syn
-            //    return -1; // erreur ipsend
-            printf("2\n");
+            if(IP_send(syn, addr) == -1) // envoie de syn
+                return -1; // erreur ipsend
         }while(IP_recv(&synack, &sock.addr, TIMEOUT) == -1);
-
-        printf("non ? et ça ?\n");
+        
+        printf("%s", synack.payload.data);
 
         if(synack.header.syn == 1 && synack.header.ack == 1){
-            //construction et envoi du pdu ack
+            printf("SYNACK recu\n");
+
+            /* envoie de ACK */
             mic_tcp_pdu ack;
-            fill_pdu(&ack,0,addr.port,0,0,0,1,0,"",0);
-            /*ack.header.ack = 1;
-            ack.header.dest_port = addr.port; */
-            IP_send(ack, addr);
+            fill_pdu(&ack,sock.addr.port, addr.port,1,0,0,1,0,"",0);
+            if(IP_send(ack, addr) == -1)
+                return -1;
+
+            printf("ack sent\n");
 
             sock.state = CONNECTED;
         }else{
             return -1; //ce n'est pas un synack, connexion echouée
         }
-
-        printf("toujours pas ? et ceci ?\n");
 
     }else{
         return -1; //on n'est pas en IDLE
@@ -190,9 +180,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
         //construction du pdu
         mic_tcp_pdu pdu;
         fill_pdu(&pdu,0,sock.addr.port,0,0,0,0,0,mesg,mesg_size);
-        /*pdu.payload.data = mesg;
-        pdu.payload.size = mesg_size;
-        pdu.header.dest_port = sock.addr.port;*/
+
         pdu.header.seq_num = sn++;
         int size = IP_send(pdu, sock.addr);
 
@@ -212,7 +200,6 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
                 printf("Timeout ack, resending (%d left)... \n", MAX_RESEND - nb_resend);
                 size = IP_send(pdu, sock.addr);
             } else { // on recoit le ack on quitte la boucle while
-                //TODO verifier que c'est un ack
                 printf("Reception du ack n %d \n", ack.header.ack_num);
                 derniers_messages[n_message] = 1;
                 break;
@@ -242,6 +229,7 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
  
     if(sock.state != CONNECTED)
+        perror("[MIC-TCP] Erreur, etat non connecte\n");
         return -1; // pas en etat connecté, on ne peut pas recevoir
 
     mic_tcp_payload mesg_recu;
@@ -254,6 +242,7 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
         nb_octets_lus = app_buffer_get(mesg_recu);
         return nb_octets_lus;
     }
+
     return -1;
 }
 
@@ -276,22 +265,23 @@ int mic_tcp_close (int socket)
  */
 void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 {
-
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-    
+
+    if(sock.state == WAIT_FOR_SYN)
+        if(pdu.header.syn == 1)
+            sock.state = WAIT_FOR_ACK;
+
+    if(sock.state == WAIT_FOR_ACK)
+        if(pdu.header.ack == 1)
+            sock.state = CONNECTED;
+
+    /* envoie l'acquitement */
     mic_tcp_pdu ack;
     fill_pdu(&ack,0,0,0,pdu.header.seq_num,0,1,0,"",0);
-    /*ack.header.ack = 1; //flag pour indiquer que le message est un acquitement
-    ack.header.ack_num = pdu.header.seq_num;
-    ack.payload.size = 0;*/
+    IP_send(ack, sock.addr);
 
-    IP_send(ack, sock.addr); //envoie l'acquitement
-    
-    if(pdu.header.seq_num != last_sn){ // si on ne reçoit pas deux fois le même message, on le met dans le buffer
-        app_buffer_put(pdu.payload);
-    }else{
-        printf("ACK lost \n");
-    }
+    /* passage du payload a l'application */
+    app_buffer_put(pdu.payload);
 
     last_sn = pdu.header.seq_num;
 }

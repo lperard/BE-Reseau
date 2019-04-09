@@ -40,7 +40,7 @@ int mic_tcp_socket(start_mode sm)
         return -1;
     }
 
-    set_loss_rate(20);
+    set_loss_rate(5);
 
     return sock.fd;
 }
