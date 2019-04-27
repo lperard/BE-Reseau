@@ -201,46 +201,83 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 
     /* envoie du message */
     int size = IP_send(pdu, sock.addr);
+    //On a envoyé notre donnée, on attend l'ack
+    sock.state = WAIT_FOR_ACK;
+    
+    //on crée un thread qui s'occupera de la réémission du pdu s'il n'a pas été correctement envoyé ou acquitté
+    if (pthread_create(&tid, NULL, mic_tcp_send_boucle, &pdu) != 0) {
+			printf("Erreur: pthread_create\n");
+		}
 
     /* initialisation du pdu ack pour la reception */
-    mic_tcp_pdu ack;
-    ack.payload.size = 2*sizeof(short)+2*sizeof(int)+3*sizeof(char);
-    ack.payload.data = malloc(ack.payload.size);
+/*mic_tcp_pdu ack;
+ *   ack.payload.size = 2*sizeof(short)+2*sizeof(int)+3*sizeof(char);
+ *   ack.payload.data = malloc(ack.payload.size);
+*
+ *   if(IP_recv(&ack, &addr_dest, TIMEOUT) == -1){   // si on ne recoit pas ack a temps
+ *       if(taux_perte() < taux_perte_acceptable){   // si la perte est acceptable, on ne renvoie rien
+ *           derniers_messages[n_message] = 0;       // maj de la fenetre glissante
+ *           
+ *           /* Incrémentation de numero de sequence */
+ /*           seq_num = (seq_num + 1) % 2;
+*
+ *           printf("Perte admissible (%d pct) \n", taux_perte());
+ *       } else {
+ *           //renvoi du message, mécanisme du stop and wait
+ *           int nb_resend = 0;
+ *           do{
+ *               nb_resend++;
+ *               printf("Timeout ack, resending (%d left)... \n", MAX_RESEND - nb_resend);
+ *               size = IP_send(pdu, sock.addr);
+ *           }while(nb_resend < MAX_RESEND && IP_recv(&ack, &addr_dest, TIMEOUT) == -1);
+*
+ *           if(nb_resend == MAX_RESEND){
+ *               printf("Aucune réponse du récepteur\n");
+ *           }else{
+ *               printf("Reception du ack n %d \n", ack.header.ack_num);
+ *               derniers_messages[n_message] = 1; // maj de la fenetre glissante
+ *           }
+*
+ *       }
+ *   } else if(ack.header.ack == 1 && ack.header.ack_num == seq_num){
+ *       printf("Reception du ack n %d \n", ack.header.ack_num);
+ *       derniers_messages[n_message] = 1; // maj de la fenetre glissante
+ *   } else {
+ *       printf("Le message recu n'est pas le ACK attendu (expected %d received %d)\n", seq_num, ack.header.ack_num);
+ *   } 
+*/
+    n_message = (n_message + 1) % TAILLE_FENETRE_GLISSANTE;
+    return size;
+}
 
-    if(IP_recv(&ack, &addr_dest, TIMEOUT) == -1){   // si on ne recoit pas ack a temps
+void * mic_tcp_send_boucle (void * pdu) {
+    int size = 0;
+    static int n_message = 0; //A VERIFIER
+    //On attend de voir si l'echec de l'envoi est dû au timer
+    sleep(TIMEOUT);
+
+    mic_tcp_pdu ack;
+    while (sock.state == WAIT_FOR_ACK) {
         if(taux_perte() < taux_perte_acceptable){   // si la perte est acceptable, on ne renvoie rien
-            derniers_messages[n_message] = 0;       // maj de la fenetre glissante
-            
+            derniers_messages[n_message] = 0;       // maj de la fenetre glissante          
             /* Incrémentation de numero de sequence */
             seq_num = (seq_num + 1) % 2;
-
             printf("Perte admissible (%d pct) \n", taux_perte());
-        } else {
+        }
+        else {
             //renvoi du message, mécanisme du stop and wait
             int nb_resend = 0;
             do{
                 nb_resend++;
                 printf("Timeout ack, resending (%d left)... \n", MAX_RESEND - nb_resend);
-                size = IP_send(pdu, sock.addr);
-            }while(nb_resend < MAX_RESEND && IP_recv(&ack, &addr_dest, TIMEOUT) == -1);
-
-            if(nb_resend == MAX_RESEND){
-                printf("Aucune réponse du récepteur\n");
-            }else{
-                printf("Reception du ack n %d \n", ack.header.ack_num);
-                derniers_messages[n_message] = 1; // maj de la fenetre glissante
-            }
-
+                size = IP_send(*(mic_tcp_pdu *)pdu, sock.addr);
+        } while(nb_resend < MAX_RESEND && IP_recv(&ack, &addr_dest, TIMEOUT) == -1);
+        if(nb_resend == MAX_RESEND){
+            printf("Aucune réponse du récepteur\n");
         }
-    } else if(ack.header.ack == 1 && ack.header.ack_num == seq_num){
-        printf("Reception du ack n %d \n", ack.header.ack_num);
-        derniers_messages[n_message] = 1; // maj de la fenetre glissante
-    } else {
-        printf("Le message recu n'est pas le ACK attendu (expected %d received %d)\n", seq_num, ack.header.ack_num);
+        }
     }
-
-    n_message = (n_message + 1) % TAILLE_FENETRE_GLISSANTE;
-    return size;
+    pthread_exit(NULL);
 }
  
 /*
@@ -312,11 +349,7 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
                 app_buffer_put(pdu.payload);
 
                 /* Incrémentation de ack_num */
-                ack_num = (ack_num + 1) % 2;
-                //Pas d'accord : on envoie un message avec sn comme seq_num, on doit renvoyer
-                //un ack qui vaut sn sauf qu'il a ete incrémenté, 
-                //donc autant utiliser last_sn, variable inutilisé qu'on a juste a incrémenter et à 
-                //mettre en static
+                ack_num = (ack_num + 1) % TAILLE_FENETRE_GLISSANTE;
             }
 
             /* envoie l'acquitement */
@@ -328,9 +361,32 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
         default:
             break;
     }
-    
+}
     //meme fonction que process received pdu mais coté client
 void client_process_received_pdu (mic_tcp_pdu pdu, mic_tcp_sock_addr addr) {
+    //Phase de connexion
+    //Si on est en attente du SYNACK
+    if(sock.state == WAIT_FOR_SYNACK){
+        mic_tcp_pdu ack;
+        if ((pdu.header.ack == 1) && (pdu.header.syn == 1)) {
+            sock.state = CONNECTED;
+        }
+        fill_pdu(&ack,sock.addr.port, addr.port,0,0,0,1,0,"",0);
+        if (IP_send(ack, addr) == -1) {
+            printf("Erreur dans l'envoi du ACK de connexion");
+        }
+    }
     
-}
+    //Si on est pas en phase de connexion, on envoie des données, le client attends des ack
+    if(sock.state == WAIT_FOR_ACK) {
+        //si on recoit le bon ack
+        if((pdu.header.ack == 1) && (pdu.header.syn == 0) && (pdu.header.ack_num == ack_num)) {
+            //je sais pas quoi faire là, est ce qu'on update notre fenetre glissante?
+            sock.state = CONNECTED;
+        }
+        else {
+            printf("On a soit pas recu un ack, soit le numero ne correspond pas\n");
+        }
+    }
+
 }
