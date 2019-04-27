@@ -12,6 +12,7 @@
 int initialized = -1;
 int sys_socket;
 pthread_t listen_th;
+pthread_t client_listen_th;
 pthread_mutex_t lock;
 unsigned short  loss_rate = 0;
 struct sockaddr_in remote_addr;
@@ -88,7 +89,10 @@ int initialize_components(start_mode mode)
     {
         pthread_create (&listen_th, NULL, listening, "1");
     }
-
+    //On lance le thread d'écoute mais du coté client
+    if ((initialized == 1) && (mode == CLIENT)) {
+        pthread_create(&client_listen_th, NULL, client_listening, NULL);
+    }
     return initialized;
 }
 
@@ -315,7 +319,35 @@ void* listening(void* arg)
         }
     }
 }
+//client_listening joue le même role que listening mais appelle la version client de process receiv pdu pour gérer les ack des messages envoyés
+void client_listening (void * arg) {
+mic_tcp_pdu pdu_tmp;
+    int recv_size;
+    mic_tcp_sock_addr remote;
 
+    pthread_mutex_init(&lock, NULL);
+
+    printf("[MICTCP-CORE] Demarrage du thread de reception reseau...\n");
+
+    const int payload_size = 1500 - API_HD_Size;
+    pdu_tmp.payload.size = payload_size;
+    pdu_tmp.payload.data = malloc(payload_size);
+
+
+    while(1)
+    {
+        pdu_tmp.payload.size = payload_size;
+        recv_size = IP_recv(&pdu_tmp, &remote, 0);
+
+        if(recv_size != -1)
+        {
+            client_process_received_PDU(pdu_tmp, remote);
+        } else {
+            /* This should never happen */
+            printf("Error in recv\n");
+        }
+    }
+}
 
 void set_loss_rate(unsigned short rate)
 {

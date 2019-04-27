@@ -38,6 +38,7 @@ mic_tcp_payload get_full_stream(mic_tcp_pdu);
 mic_tcp_payload get_mic_tcp_data(ip_payload);
 mic_tcp_header get_mic_tcp_header(ip_payload);
 void* listening(void*);
+void * client_listening(void * );
 void print_header(mic_tcp_pdu);
 
 int min_size(int, int);

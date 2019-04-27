@@ -313,6 +313,10 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 
                 /* Incrémentation de ack_num */
                 ack_num = (ack_num + 1) % 2;
+                //Pas d'accord : on envoie un message avec sn comme seq_num, on doit renvoyer
+                //un ack qui vaut sn sauf qu'il a ete incrémenté, 
+                //donc autant utiliser last_sn, variable inutilisé qu'on a juste a incrémenter et à 
+                //mettre en static
             }
 
             /* envoie l'acquitement */
@@ -324,4 +328,9 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
         default:
             break;
     }
+    
+    //meme fonction que process received pdu mais coté client
+void client_process_received_pdu (mic_tcp_pdu pdu, mic_tcp_sock_addr addr) {
+    
+}
 }
