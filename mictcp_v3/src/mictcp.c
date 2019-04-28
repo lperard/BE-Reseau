@@ -9,7 +9,7 @@
 char derniers_messages[TAILLE_FENETRE_GLISSANTE]; //1 = message acquitté, 0 = message perdu
 float taux_perte_acceptable = 0.50;
 
-/* Définition des variables gloables */
+/* Définition des variables gloable */
 mic_tcp_sock sock;
 int nextld = 0; // id du socket
 int sn = 0; // numero de sequence du message à envoyer

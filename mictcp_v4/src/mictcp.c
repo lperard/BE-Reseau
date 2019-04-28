@@ -126,7 +126,9 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
     sock.state = WAIT_FOR_SYNACK;
 
     //Création du thread du réenvoi du syn tant qu'on a pas recu le synack
-    if (pthread_create(&thread_reenvoi_syn, NULL, ))
+    if (pthread_create(&thread_reenvoi_syn, NULL, mic_tcp_send_syn_boucle, &syn) == -1){
+        printf("Erreur dans la création du thread\n");
+    }
     /* envoie du SYN tant que l'on a pas recu de synack */
 /*    do{
  *       if(IP_send(syn, addr) == -1)
@@ -163,8 +165,26 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
     return 0; // la connexion est etablie
 }
 void * mic_tcp_send_syn_boucle (void * syn) {
-
+    sleep(TIMEOUT);
+    
+    int nb_resend = 1;
+    //Tant qu'on a pas le synack, on continue le réenvoi
+    while (sock.state == WAIT_FOR_SYNACK) {
+        if (nb_resend < MAX_RESEND) {
+            if (IP_send(*(mic_tcp_pdu *)syn, addr_dest)) {
+                printf("Erreur d'envoi du syn\n");
+            }
+            nb_resend++;
+            sleep(TIMEOUT);
+        }
+        else {
+            //Trop de réenvoi, on quitte le thread
+            exit(1);
+        }
+    }
+    pthread_exit(NULL);
 }
+
 /*
 * initialise la fenetre glissante
 */
