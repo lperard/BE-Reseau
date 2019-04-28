@@ -105,6 +105,7 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
  */
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 {
+    pthread_t thread_reenvoi_syn;
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
     
     if(sock.state != IDLE)
@@ -119,15 +120,22 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
     synack.payload.size = BUFFER_SIZE;
     synack.payload.data = malloc(synack.payload.size);
     
+    if (IP_send(syn, addr) == -1) {
+        printf("Erreur dans le premier envoi du syn");
+    }
+    sock.state = WAIT_FOR_SYNACK;
+
+    //Création du thread du réenvoi du syn tant qu'on a pas recu le synack
+    if (pthread_create(&thread_reenvoi_syn, NULL, ))
     /* envoie du SYN tant que l'on a pas recu de synack */
-    do{
-        if(IP_send(syn, addr) == -1)
-            return -1; // erreur ipsend
-    }while(IP_recv(&synack, &addr_dest, TIMEOUT) == -1);
-
-    if(!(synack.header.syn == 1 && synack.header.ack == 1))
-        return -1; //ce n'est pas un synack, connexion echouée
-
+/*    do{
+ *       if(IP_send(syn, addr) == -1)
+ *           return -1; // erreur ipsend
+ *   }while(IP_recv(&synack, &addr_dest, TIMEOUT) == -1);
+*
+ *   if(!(synack.header.syn == 1 && synack.header.ack == 1))
+ *       return -1; //ce n'est pas un synack, connexion echouée
+*/
     /* On lit le taux de perte demande par le serveur */
     int taux_demande = *synack.payload.data;
 
@@ -151,10 +159,12 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 
     /* on passe dans l'etat connecté */
     sock.state = CONNECTED;
-   
+    while(sock.state == WAIT_FRO_SYNACK);
     return 0; // la connexion est etablie
 }
- 
+void * mic_tcp_send_syn_boucle (void * syn) {
+
+}
 /*
 * initialise la fenetre glissante
 */
@@ -177,6 +187,7 @@ int taux_perte(){
  */
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
+    pthread_t thread_reenvoi;
     /* Si on n'est pas en état connecté, on n'envoie rien */
     if(sock.state != CONNECTED)
         return -1;
@@ -197,7 +208,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     fill_pdu(&pdu,sock.addr.port,addr_dest.port,seq_num,0,0,0,0,mesg,mesg_size);
 
     /* Incrémentation de numero de sequence */
-    seq_num = (seq_num + 1) % 2;
+    seq_num = (seq_num + 1) % TAILLE_FENETRE_GLISSANTE;
 
     /* envoie du message */
     int size = IP_send(pdu, sock.addr);
@@ -205,7 +216,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     sock.state = WAIT_FOR_ACK;
     
     //on crée un thread qui s'occupera de la réémission du pdu s'il n'a pas été correctement envoyé ou acquitté
-    if (pthread_create(&tid, NULL, mic_tcp_send_boucle, &pdu) != 0) {
+    if (pthread_create(&thread_reenvoi, NULL, mic_tcp_send_boucle, &pdu) != 0) {
 			printf("Erreur: pthread_create\n");
 		}
 
@@ -261,8 +272,9 @@ void * mic_tcp_send_boucle (void * pdu) {
         if(taux_perte() < taux_perte_acceptable){   // si la perte est acceptable, on ne renvoie rien
             derniers_messages[n_message] = 0;       // maj de la fenetre glissante          
             /* Incrémentation de numero de sequence */
-            seq_num = (seq_num + 1) % 2;
+            seq_num = (seq_num + 1) % TAILLE_FENETRE_GLISSANTE;
             printf("Perte admissible (%d pct) \n", taux_perte());
+            sock.state = CONNECTED;
         }
         else {
             //renvoi du message, mécanisme du stop and wait
@@ -271,11 +283,12 @@ void * mic_tcp_send_boucle (void * pdu) {
                 nb_resend++;
                 printf("Timeout ack, resending (%d left)... \n", MAX_RESEND - nb_resend);
                 size = IP_send(*(mic_tcp_pdu *)pdu, sock.addr);
-        } while(nb_resend < MAX_RESEND && IP_recv(&ack, &addr_dest, TIMEOUT) == -1);
+        }while(nb_resend < MAX_RESEND && IP_recv(&ack, &addr_dest, TIMEOUT) == -1);
         if(nb_resend == MAX_RESEND){
             printf("Aucune réponse du récepteur\n");
         }
         }
+        sock.state = CONNECTED;
     }
     pthread_exit(NULL);
 }
