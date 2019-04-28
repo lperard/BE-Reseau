@@ -97,6 +97,7 @@ int mic_tcp_socket(start_mode sm);
 int mic_tcp_bind(int socket, mic_tcp_sock_addr addr);
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr);
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr);
+void * mic_tcp_send_syn_boucle (void * syn);
 int mic_tcp_send (int socket, char* mesg, int mesg_size);
 void * mic_tcp_send_boucle (void * pdu);
 int mic_tcp_recv (int socket, char* mesg, int max_mesg_size);
