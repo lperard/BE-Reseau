@@ -1,6 +1,6 @@
 # INSA BE Reseau
 
-This project is a simpler implementation of the TCP protocol.
+This project is a simpler implementation of the TCP protocol. Made with Ruben Gres, in April 2019.
 
 Each version adds a new feature:
 V1 is just uses the IP protocls without implementing any feature of the TCP protocol.
